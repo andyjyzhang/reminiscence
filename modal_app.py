@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hmac
-import os
 import shutil
 import subprocess
 import sys
@@ -17,21 +15,56 @@ APP_NAME = "reminiscence"
 GPU_IMAGE = "ghcr.io/andyjyzhang/reminiscence:gpu-latest"
 VOLUME_NAME = "reminiscence-data"
 USAGE_DICT_NAME = "reminiscence-usage"
-SECRET_NAME = "reminiscence-secrets"
 
 DATA_ROOT = Path("/reminiscence-data")
 JOB_ROOT = DATA_ROOT / "jobs"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
-DAILY_JOB_LIMIT = 10
 MONTHLY_JOB_LIMIT = 30
 TRAINING_ITERATIONS = 1000
 JOB_TIMEOUT_SECONDS = 20 * 60
 RETENTION_DAYS = 7
+GPU_CPU_CORES = 4.0
+GPU_MEMORY_MIB = 32 * 1024
+WEB_CPU_CORES = 0.125
+WEB_MEMORY_MIB = 512
+SCALEDOWN_WINDOW_SECONDS = 30
+FREE_MONTHLY_CREDIT_USD = 30.0
+REQUIRED_WORKSPACE_BUDGET_USD = 29.0
+
+# Current Modal list prices. The estimate deliberately assumes the public web
+# API is busy every second of a 31-day month and every GPU job hits its timeout.
+A10_USD_PER_SECOND = 0.000306
+CPU_CORE_USD_PER_SECOND = 0.0000131
+MEMORY_GIB_USD_PER_SECOND = 0.00000222
+LONGEST_MONTH_SECONDS = 31 * 24 * 60 * 60
+CLEANUP_MAX_SECONDS_PER_MONTH = 31 * 10 * 60
+
+
+def estimated_max_monthly_compute_usd() -> float:
+    gpu_seconds = MONTHLY_JOB_LIMIT * (JOB_TIMEOUT_SECONDS + SCALEDOWN_WINDOW_SECONDS)
+    gpu_worker = gpu_seconds * (
+        A10_USD_PER_SECOND
+        + GPU_CPU_CORES * CPU_CORE_USD_PER_SECOND
+        + (GPU_MEMORY_MIB / 1024) * MEMORY_GIB_USD_PER_SECOND
+    )
+    public_api = LONGEST_MONTH_SECONDS * (
+        WEB_CPU_CORES * CPU_CORE_USD_PER_SECOND
+        + (WEB_MEMORY_MIB / 1024) * MEMORY_GIB_USD_PER_SECOND
+    )
+    cleanup = CLEANUP_MAX_SECONDS_PER_MONTH * (
+        WEB_CPU_CORES * CPU_CORE_USD_PER_SECOND
+        + (WEB_MEMORY_MIB / 1024) * MEMORY_GIB_USD_PER_SECOND
+    )
+    return round(gpu_worker + public_api + cleanup, 2)
+
+
+ESTIMATED_MAX_MONTHLY_COMPUTE_USD = estimated_max_monthly_compute_usd()
+if ESTIMATED_MAX_MONTHLY_COMPUTE_USD >= REQUIRED_WORKSPACE_BUDGET_USD:
+    raise ValueError("Configured resource limits exceed the required Modal workspace budget")
 
 app = modal.App(APP_NAME, tags={"project": "reminiscence"})
 data_volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 usage = modal.Dict.from_name(USAGE_DICT_NAME, create_if_missing=True)
-api_secret = modal.Secret.from_name(SECRET_NAME, required_keys=["REMINISCENCE_API_KEY"])
 
 web_image = modal.Image.debian_slim(python_version="3.11").pip_install(
     "fastapi==0.124.4",
@@ -54,7 +87,9 @@ def _public_result(call_id: str, result: dict) -> dict:
     volumes={str(DATA_ROOT): data_volume},
     timeout=JOB_TIMEOUT_SECONDS,
     max_containers=1,
-    scaledown_window=30,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    cpu=GPU_CPU_CORES,
+    memory=GPU_MEMORY_MIB,
 )
 def reconstruct(upload_id: str, captured_at: str, duration: str) -> dict:
     from backend.rendering_pipeline import prepare_fastgs_input_and_train
@@ -120,15 +155,16 @@ def reconstruct(upload_id: str, captured_at: str, duration: str) -> dict:
 
 @app.function(
     image=web_image,
-    secrets=[api_secret],
     volumes={str(DATA_ROOT): data_volume},
     timeout=15 * 60,
     max_containers=1,
-    scaledown_window=30,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
+    cpu=WEB_CPU_CORES,
+    memory=WEB_MEMORY_MIB,
 )
 @modal.asgi_app()
 def web():
-    from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
 
@@ -137,13 +173,8 @@ def web():
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-API-Key"],
+        allow_headers=["Content-Type"],
     )
-
-    def require_api_key(x_api_key: str | None) -> None:
-        expected = os.environ["REMINISCENCE_API_KEY"]
-        if not x_api_key or not hmac.compare_digest(x_api_key, expected):
-            raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
     async def poll_result(call_id: str) -> dict | None:
         function_call = modal.FunctionCall.from_id(call_id)
@@ -162,9 +193,12 @@ def web():
             "status": "server is running",
             "gpu": "A10",
             "max_gpu_containers": 1,
-            "daily_job_limit": DAILY_JOB_LIMIT,
             "monthly_job_limit": MONTHLY_JOB_LIMIT,
             "max_upload_bytes": MAX_UPLOAD_BYTES,
+            "job_timeout_seconds": JOB_TIMEOUT_SECONDS,
+            "estimated_max_monthly_compute_usd": ESTIMATED_MAX_MONTHLY_COMPUTE_USD,
+            "modal_free_monthly_compute_credit_usd": FREE_MONTHLY_CREDIT_USD,
+            "required_modal_workspace_budget_usd": REQUIRED_WORKSPACE_BUDGET_USD,
         }
 
     @web_app.post("/api/v1/moments", status_code=202)
@@ -172,9 +206,7 @@ def web():
         video: UploadFile = File(...),
         captured_at: str = Form(...),
         duration: str = Form(...),
-        x_api_key: str | None = Header(default=None),
     ):
-        require_api_key(x_api_key)
         try:
             duration_seconds = float(duration)
         except ValueError as exc:
@@ -183,15 +215,10 @@ def web():
             raise HTTPException(status_code=422, detail="Duration cannot be negative")
 
         now = datetime.now(UTC)
-        daily_usage_key = f"jobs:day:{now.date().isoformat()}"
         monthly_usage_key = f"jobs:month:{now.strftime('%Y-%m')}"
-        jobs_today = await usage.get.aio(daily_usage_key, 0)
         jobs_this_month = await usage.get.aio(monthly_usage_key, 0)
-        if jobs_today >= DAILY_JOB_LIMIT:
-            raise HTTPException(status_code=429, detail="Daily reconstruction limit reached")
         if jobs_this_month >= MONTHLY_JOB_LIMIT:
             raise HTTPException(status_code=429, detail="Monthly reconstruction limit reached")
-        await usage.put.aio(daily_usage_key, jobs_today + 1)
         await usage.put.aio(monthly_usage_key, jobs_this_month + 1)
 
         upload_id = str(uuid.uuid4())
@@ -220,8 +247,7 @@ def web():
             raise
 
     @web_app.get("/api/v1/moments/{call_id}")
-    async def get_moment(call_id: str, x_api_key: str | None = Header(default=None)):
-        require_api_key(x_api_key)
+    async def get_moment(call_id: str):
         result = await poll_result(call_id)
         if result is None:
             return {"id": call_id, "status": "processing"}
@@ -231,8 +257,7 @@ def web():
         return public_result
 
     @web_app.get("/api/v1/moments/{call_id}/splat")
-    async def download_splat(call_id: str, x_api_key: str | None = Header(default=None)):
-        require_api_key(x_api_key)
+    async def download_splat(call_id: str):
         result = await poll_result(call_id)
         if result is None:
             raise HTTPException(status_code=409, detail="Moment is processing")
@@ -258,6 +283,8 @@ def web():
     schedule=modal.Cron("17 4 * * *"),
     timeout=10 * 60,
     max_containers=1,
+    cpu=WEB_CPU_CORES,
+    memory=WEB_MEMORY_MIB,
 )
 def cleanup_expired_jobs() -> int:
     data_volume.reload()

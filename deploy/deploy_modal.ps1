@@ -1,8 +1,3 @@
-param(
-    [string]$ApiKey = "",
-    [switch]$SkipSecret
-)
-
 $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -21,33 +16,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Modal CLI is not installed. Run: python -m pip install -r deploy\requirements.txt"
 }
 
-if (-not $ApiKey -and $SkipSecret) {
-    if (-not (Test-Path -LiteralPath $statePath)) {
-        throw "Cannot preserve the Modal secret because deploy/.modal-state.json is missing."
-    }
-    $ApiKey = (Get-Content -LiteralPath $statePath | ConvertFrom-Json).api_key
-}
-if (-not $ApiKey) {
-    $bytes = New-Object byte[] 24
-    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $random.GetBytes($bytes)
-    }
-    finally {
-        $random.Dispose()
-    }
-    $ApiKey = ([BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
-}
-
 Push-Location $repoRoot
 try {
-    if (-not $SkipSecret) {
-        & python -m modal secret create reminiscence-secrets "REMINISCENCE_API_KEY=$ApiKey" --force
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not create the Modal API-key secret."
-        }
-    }
-
     $previousErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $deployOutput = & python -m modal deploy modal_app.py 2>&1
@@ -69,7 +39,6 @@ try {
     $endpoint = $endpointMatches[$endpointMatches.Count - 1].Value
     @{
         api_url = $endpoint
-        api_key = $ApiKey
         deployed_at = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath
 
@@ -77,9 +46,8 @@ try {
 
 Modal is deployed.
 API URL: $endpoint
-API key: $ApiKey
 
-The API key is saved locally in deploy/.modal-state.json.
+The API URL is saved locally in deploy/.modal-state.json.
 "@ | Write-Host
 }
 finally {

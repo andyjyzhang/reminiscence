@@ -8,20 +8,17 @@ function apiUrl(path) {
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState("");
   const [file, setFile] = useState(null);
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-
-  const headers = apiKey ? { "X-API-Key": apiKey } : {};
 
   useEffect(() => {
     if (!job?.id || terminalStatuses.has(job.status)) return undefined;
 
     const timer = setInterval(async () => {
       try {
-        const response = await fetch(apiUrl(`/api/v1/moments/${job.id}`), { headers });
+        const response = await fetch(apiUrl(`/api/v1/moments/${job.id}`));
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "Could not read job status");
         setJob(body);
@@ -31,7 +28,7 @@ export default function App() {
     }, 3000);
 
     return () => clearInterval(timer);
-  }, [job?.id, job?.status, apiKey]);
+  }, [job?.id, job?.status]);
 
   async function upload(event) {
     event.preventDefault();
@@ -49,7 +46,6 @@ export default function App() {
     try {
       const response = await fetch(apiUrl("/api/v1/moments"), {
         method: "POST",
-        headers,
         body: form,
       });
       const body = await response.json();
@@ -65,7 +61,7 @@ export default function App() {
   async function download() {
     setError("");
     try {
-      const response = await fetch(apiUrl(`/api/v1/moments/${job.id}/splat`), { headers });
+      const response = await fetch(apiUrl(`/api/v1/moments/${job.id}/splat`));
       if (!response.ok) {
         const body = await response.json();
         throw new Error(body.detail || "Download failed");
@@ -94,15 +90,6 @@ export default function App() {
 
       <section className="panel">
         <form onSubmit={upload}>
-          <label>
-            API key
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Deployment API key"
-            />
-          </label>
           <label className="file-picker">
             <span>{file ? file.name : "Choose a video"}</span>
             <input
