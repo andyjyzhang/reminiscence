@@ -124,7 +124,9 @@ Open `http://localhost:5173` and upload a video.
 - Vercel serves the static React/Vite app.
 - Modal's CPU web function receives uploads and polls jobs.
 - A Modal Volume stores uploaded videos and generated PLY files.
-- A queued Modal A10 function runs COLMAP and FastGS.
+- A queued Modal A10 function runs COLMAP and FastGS. COLMAP's SIFT
+  extraction and matching use CPU mode because its GPU mode requires an
+  OpenGL display context; FastGS training and rendering still use the A10 GPU.
 - Completed jobs return a downloadable PLY file.
 - A daily cleanup job removes files older than seven days.
 

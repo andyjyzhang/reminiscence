@@ -1,11 +1,10 @@
-from __future__ import annotations
-
+import os
 import shutil
 import subprocess
 import sys
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import modal
@@ -70,7 +69,11 @@ web_image = modal.Image.debian_slim(python_version="3.11").pip_install(
     "fastapi==0.124.4",
     "python-multipart==0.0.20",
 )
-gpu_image = modal.Image.from_registry(GPU_IMAGE)
+gpu_image = modal.Image.from_registry(GPU_IMAGE).add_local_file(
+    "prepare_colmap_windows.py",
+    "/app/prepare_colmap_windows.py",
+    copy=True,
+)
 
 
 def _public_result(call_id: str, result: dict) -> dict:
@@ -107,6 +110,9 @@ def reconstruct(upload_id: str, captured_at: str, duration: str) -> dict:
         raise FileNotFoundError(f"Uploaded video is missing: {video_path}")
 
     try:
+        colmap_env = os.environ.copy()
+        colmap_env["COLMAP_USE_GPU"] = "0"
+        colmap_env["QT_QPA_PLATFORM"] = "offscreen"
         subprocess.run(
             [
                 sys.executable,
@@ -119,6 +125,7 @@ def reconstruct(upload_id: str, captured_at: str, duration: str) -> dict:
                 "--export-ply",
             ],
             check=True,
+            env=colmap_env,
         )
         pipeline_result = prepare_fastgs_input_and_train(
             colmap_output_dir=colmap_output_dir,
@@ -214,7 +221,7 @@ def web():
         if duration_seconds < 0:
             raise HTTPException(status_code=422, detail="Duration cannot be negative")
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         monthly_usage_key = f"jobs:month:{now.strftime('%Y-%m')}"
         jobs_this_month = await usage.get.aio(monthly_usage_key, 0)
         if jobs_this_month >= MONTHLY_JOB_LIMIT:
@@ -238,12 +245,12 @@ def web():
                         )
                     destination.write(chunk)
 
-            data_volume.commit()
+            await data_volume.commit.aio()
             call = await reconstruct.spawn.aio(upload_id, captured_at, str(duration_seconds))
             return {"id": call.object_id, "status": "queued"}
         except Exception:
             shutil.rmtree(job_dir, ignore_errors=True)
-            data_volume.commit()
+            await data_volume.commit.aio()
             raise
 
     @web_app.get("/api/v1/moments/{call_id}")
@@ -290,7 +297,7 @@ def cleanup_expired_jobs() -> int:
     data_volume.reload()
     cutoff = time.time() - RETENTION_DAYS * 24 * 60 * 60
     removed = 0
-    monthly_usage_key = f"jobs:month:{datetime.now(UTC).strftime('%Y-%m')}"
+    monthly_usage_key = f"jobs:month:{datetime.now(timezone.utc).strftime('%Y-%m')}"
     monthly_usage = usage.get(monthly_usage_key)
     if monthly_usage is not None:
         usage.put(monthly_usage_key, monthly_usage)
