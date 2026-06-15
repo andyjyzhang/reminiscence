@@ -27,7 +27,9 @@ $env:RUNPOD_API_KEY="<runpod-api-key>"
 
 This creates an RTX 3090 Pod, exposes port `8000`, generates a separate API key
 for the app, and writes the Pod URL to `frontend/.env.local`. It starts with
-`1000` training iterations for an affordable first test.
+`1000` training iterations for an affordable first test. It does not allocate
+persistent storage, so terminate the Pod after testing and download any splats
+you want to keep first.
 
 ## Use the API
 
