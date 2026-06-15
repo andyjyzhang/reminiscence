@@ -24,10 +24,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir \
       torch==1.12.1+cu116 torchvision==0.13.1+cu116 torchaudio==0.12.1 \
       --extra-index-url https://download.pytorch.org/whl/cu116 && \
-    python -m pip install --no-cache-dir plyfile tqdm websockets
+    python -m pip install --no-cache-dir numpy==1.26.4 plyfile==0.9 tqdm websockets
 
 COPY . .
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-build-isolation --no-cache-dir \
     ./fastgs/submodules/diff-gaussian-rasterization_fastgs \
     ./fastgs/submodules/simple-knn \
     ./fastgs/submodules/fused-ssim
