@@ -1,6 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$RunPodApiKey,
+    [string]$RunPodApiKey = $env:RUNPOD_API_KEY,
 
     [string]$ImageName = "ghcr.io/andyjyzhang/reminiscence:gpu-latest",
     [string]$GpuType = "NVIDIA GeForce RTX 3090",
@@ -8,6 +7,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $RunPodApiKey) {
+    throw "Set RUNPOD_API_KEY or pass -RunPodApiKey."
+}
+
 $appApiKey = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
 
 $body = @{
@@ -43,8 +46,15 @@ $pod = Invoke-RestMethod `
 $apiUrl = "https://$($pod.id)-8000.proxy.runpod.net"
 $envPath = Join-Path $PSScriptRoot "..\frontend\.env.local"
 "VITE_API_BASE_URL=$apiUrl" | Set-Content -LiteralPath $envPath -Encoding ascii
+$statePath = Join-Path $PSScriptRoot ".runpod-state.json"
+@{
+    podId = $pod.id
+    apiUrl = $apiUrl
+    appApiKey = $appApiKey
+} | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding ascii
 
 Write-Host "Pod ID: $($pod.id)"
 Write-Host "API URL: $apiUrl"
 Write-Host "Reminiscence API key: $appApiKey"
 Write-Host "Saved frontend URL to frontend/.env.local"
+Write-Host "Saved local deployment state to deploy/.runpod-state.json"

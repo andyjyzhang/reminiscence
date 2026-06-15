@@ -17,3 +17,4 @@ frontend/dist
 .tmp-fastgs-upstream
 frontend/vite.log
 frontend/vite-error.log
+deploy/.runpod-state.json

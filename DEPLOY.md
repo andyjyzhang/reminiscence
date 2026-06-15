@@ -21,7 +21,8 @@ the private package.
 Create a RunPod API key, then run:
 
 ```powershell
-.\deploy\create_runpod_pod.ps1 -RunPodApiKey "<runpod-api-key>"
+$env:RUNPOD_API_KEY="<runpod-api-key>"
+.\deploy\create_runpod_pod.ps1
 ```
 
 This creates an RTX 3090 Pod, exposes port `8000`, generates a separate API key
@@ -70,3 +71,9 @@ npm run dev
 
 Open `http://localhost:5173`, enter the same API key configured on the Pod,
 choose a video, and keep the page open while it polls the reconstruction job.
+
+Delete the Pod when you are finished so GPU billing stops:
+
+```powershell
+.\deploy\remove_runpod_pod.ps1
+```
