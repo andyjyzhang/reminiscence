@@ -100,7 +100,7 @@ export default function App() {
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder="RunPod API access key"
+              placeholder="Deployment API key"
             />
           </label>
           <label className="file-picker">

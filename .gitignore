@@ -18,3 +18,6 @@ frontend/dist
 frontend/vite.log
 frontend/vite-error.log
 deploy/.runpod-state.json
+deploy/.modal-state.json
+.vercel
+frontend/.vercel

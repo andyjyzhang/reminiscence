@@ -6,7 +6,7 @@ Technically, the deployable app connects a React frontend, a FastAPI backend,
 COLMAP, FastGS, and Unity/OpenXR. The older Swift capture prototype remains in
 `swift-app/`.
 
-For a public Linux GPU deployment that returns downloadable splats, see
+For a Vercel frontend and on-demand Modal GPU deployment, see
 [`DEPLOY.md`](DEPLOY.md).
 
 ## End-to-end pipeline

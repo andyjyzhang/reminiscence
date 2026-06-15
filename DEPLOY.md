@@ -1,69 +1,88 @@
-# Local React App + RunPod GPU Backend
+# Vercel Frontend + Modal GPU Deployment
 
-The React frontend runs locally. The cloud deployment runs only FastAPI, COLMAP,
-and FastGS on a Linux GPU. It intentionally does not run Unity: download the
-generated PLY and import it into Unity locally.
+The React frontend runs on Vercel. Modal hosts a small CPU API and starts one
+A10 GPU worker only while a reconstruction is running. No GPU workload runs on
+your local computer or on Vercel.
 
-## Build and publish the image
+## Cost and abuse controls
 
-Push the deployment files to `main`, then run the `Build GPU image` workflow in
-GitHub Actions. It publishes:
+The limits are defined near the top of `modal_app.py`:
 
 ```text
-ghcr.io/andyjyzhang/reminiscence:gpu-latest
+GPU workers:          1 maximum
+GPU job timeout:      20 minutes
+Daily jobs:           10 maximum
+Monthly jobs:         30 maximum
+Upload size:          200 MB maximum
+Result retention:     7 days
+Training iterations:  1000
 ```
 
-Make the GHCR package public, or configure RunPod registry authentication for
-the private package.
+Both the API and GPU worker scale to zero when idle. Every upload, status, and
+download request requires the generated `X-API-Key`. Modal's Starter plan
+includes $30/month in compute credit, but you should also set a `$30` workspace
+budget in Modal under **Settings > Usage & Billing > Workspace budget**.
 
-## Create the RunPod Pod
+## First deployment
 
-Create a RunPod API key, then run:
+Create free accounts at [Modal](https://modal.com) and
+[Vercel](https://vercel.com), then install and authenticate their CLIs:
 
 ```powershell
-$env:RUNPOD_API_KEY="<runpod-api-key>"
-.\deploy\create_runpod_pod.ps1
+python -m pip install -r deploy\requirements.txt
+python -m modal token new
+npx vercel login
 ```
 
-This creates an RTX 3090 Pod, exposes port `8000`, generates a separate API key
-for the app, and writes the Pod URL to `frontend/.env.local`. It starts with
-`1000` training iterations for an affordable first test. It does not allocate
-persistent storage, so terminate the Pod after testing and download any splats
-you want to keep first.
-
-## Use the API
-
-Every protected request must include `X-API-Key`.
+Deploy both services:
 
 ```powershell
-curl.exe -H "X-API-Key: <key>" `
-  -F "video=@clip.mp4" `
-  -F "captured_at=2026-06-07T12:00:00Z" `
-  -F "duration=10" `
-  https://<pod-id>-8000.proxy.runpod.net/api/v1/moments
+powershell -ExecutionPolicy Bypass -File .\deploy\deploy_cloud.ps1
 ```
 
-The upload returns a moment ID immediately. Poll its status:
+The script:
+
+1. Generates a strong API key.
+2. Saves it as the Modal secret `reminiscence-secrets`.
+3. Deploys the Modal API and GPU worker.
+4. Saves the endpoint and API key to ignored file `deploy/.modal-state.json`.
+5. Links and deploys the React frontend as the Vercel project `reminiscence`.
+6. Configures `VITE_API_BASE_URL` for the Vercel production deployment.
+
+Enter the generated API key in the deployed web app before uploading a video.
+Do not put that API key in a `VITE_` environment variable because Vite exposes
+those values to every browser visitor.
+
+## Deploy services separately
+
+Redeploy Modal after changing `modal_app.py` or GPU behavior:
 
 ```powershell
-curl.exe -H "X-API-Key: <key>" `
-  https://<pod-id>-8000.proxy.runpod.net/api/v1/moments/<moment-id>
+powershell -ExecutionPolicy Bypass -File .\deploy\deploy_modal.ps1 -SkipSecret
 ```
 
-When its status is `complete`, download the splat:
+Redeploy Vercel after changing the React frontend:
 
 ```powershell
-curl.exe -H "X-API-Key: <key>" -o memory.ply `
-  https://<pod-id>-8000.proxy.runpod.net/api/v1/moments/<moment-id>/splat
+powershell -ExecutionPolicy Bypass -File .\deploy\deploy_vercel.ps1
 ```
 
-Create `frontend/.env.local` with the remote URL:
+To deliberately rotate the API key:
 
 ```powershell
-VITE_API_BASE_URL=https://<pod-id>-8000.proxy.runpod.net
+powershell -ExecutionPolicy Bypass -File .\deploy\deploy_modal.ps1
 ```
 
-Then run the local React app:
+## Local frontend against Modal
+
+After Modal has deployed, copy its URL from `deploy/.modal-state.json` into
+`frontend/.env.local`:
+
+```text
+VITE_API_BASE_URL=https://your-modal-web-endpoint.modal.run
+```
+
+Then run:
 
 ```powershell
 cd frontend
@@ -71,11 +90,17 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`, enter the same API key configured on the Pod,
-choose a video, and keep the page open while it polls the reconstruction job.
+Open `http://localhost:5173` and enter the API key stored in
+`deploy/.modal-state.json`.
 
-Delete the Pod when you are finished so GPU billing stops:
+## Architecture
 
-```powershell
-.\deploy\remove_runpod_pod.ps1
-```
+- Vercel serves the static React/Vite app.
+- Modal's CPU web function receives uploads and polls jobs.
+- A Modal Volume stores uploaded videos and generated PLY files.
+- A queued Modal A10 function runs COLMAP and FastGS.
+- Completed jobs return a downloadable PLY file.
+- A daily cleanup job removes files older than seven days.
+
+Modal function results also expire after seven days, so old job URLs stop
+working even if a stale browser tab remains open.
