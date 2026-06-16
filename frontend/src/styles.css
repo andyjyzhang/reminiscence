@@ -176,6 +176,7 @@ button:disabled {
   font-family: "Playfair Display", serif;
   font-size: clamp(2rem, 5vw, 3.8rem);
   letter-spacing: -0.04em;
+  text-transform: none;
 }
 
 .viewer-card {

@@ -19,7 +19,7 @@ DATA_ROOT = Path("/reminiscence-data")
 JOB_ROOT = DATA_ROOT / "jobs"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MONTHLY_JOB_LIMIT = 30
-TRAINING_ITERATIONS = 1000
+TRAINING_ITERATIONS = 7000
 JOB_TIMEOUT_SECONDS = 20 * 60
 RETENTION_DAYS = 7
 GPU_CPU_CORES = 4.0
@@ -203,6 +203,7 @@ def web():
             "monthly_job_limit": MONTHLY_JOB_LIMIT,
             "max_upload_bytes": MAX_UPLOAD_BYTES,
             "job_timeout_seconds": JOB_TIMEOUT_SECONDS,
+            "training_iterations": TRAINING_ITERATIONS,
             "estimated_max_monthly_compute_usd": ESTIMATED_MAX_MONTHLY_COMPUTE_USD,
             "modal_free_monthly_compute_credit_usd": FREE_MONTHLY_CREDIT_USD,
             "required_modal_workspace_budget_usd": REQUIRED_WORKSPACE_BUDGET_USD,

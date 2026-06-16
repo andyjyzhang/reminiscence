@@ -38,7 +38,7 @@ GPU job timeout:      20 minutes
 Monthly jobs:         30 maximum
 Upload size:          200 MB maximum
 Result retention:     7 days
-Training iterations:  1000
+Training iterations:  7000
 GPU allocation:       4 CPU cores and 32 GiB RAM
 Web allocation:       0.125 CPU cores and 512 MiB RAM
 ```
