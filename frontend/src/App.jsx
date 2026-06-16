@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import PlyViewer from "./PlyViewer";
 
 const terminalStatuses = new Set(["complete", "failed"]);
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -9,25 +10,36 @@ function apiUrl(path) {
 
 export default function App() {
   const [file, setFile] = useState(null);
-  const [job, setJob] = useState(null);
+  const [job, setJob] = useState(() => {
+    const existingJobId = new URLSearchParams(window.location.search).get("job");
+    return existingJobId ? { id: existingJobId, status: "processing" } : null;
+  });
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!job?.id || terminalStatuses.has(job.status)) return undefined;
 
-    const timer = setInterval(async () => {
+    let cancelled = false;
+
+    async function poll() {
       try {
         const response = await fetch(apiUrl(`/api/v1/moments/${job.id}`));
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "Could not read job status");
-        setJob(body);
+        if (!cancelled) setJob(body);
       } catch (pollError) {
-        setError(pollError.message);
+        if (!cancelled) setError(pollError.message);
       }
-    }, 3000);
+    }
 
-    return () => clearInterval(timer);
+    poll();
+    const timer = setInterval(poll, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [job?.id, job?.status]);
 
   async function upload(event) {
@@ -37,6 +49,7 @@ export default function App() {
     setError("");
     setJob(null);
     setUploading(true);
+    window.history.replaceState(null, "", window.location.pathname);
 
     const form = new FormData();
     form.append("video", file);
@@ -51,6 +64,7 @@ export default function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || "Upload failed");
       setJob(body);
+      window.history.replaceState(null, "", `?job=${encodeURIComponent(body.id)}`);
     } catch (uploadError) {
       setError(uploadError.message);
     } finally {
@@ -76,6 +90,8 @@ export default function App() {
       setError(downloadError.message);
     }
   }
+
+  const splatUrl = job?.id ? apiUrl(`/api/v1/moments/${job.id}/splat`) : "";
 
   return (
     <main>
@@ -115,13 +131,23 @@ export default function App() {
             )}
             {job.error && <p className="error">{job.error}</p>}
             {job.status === "complete" && (
-              <button type="button" onClick={download}>Download .ply</button>
+              <button type="button" onClick={download}>Download .ply for Unity</button>
             )}
           </div>
         )}
 
         {error && <p className="error">{error}</p>}
       </section>
+
+      {job?.status === "complete" && (
+        <section className="viewer-panel">
+          <div className="viewer-heading">
+            <p className="eyebrow">MEMORY PREVIEW</p>
+            <h2>Explore it in the browser</h2>
+          </div>
+          <PlyViewer src={splatUrl} />
+        </section>
+      )}
     </main>
   );
 }
